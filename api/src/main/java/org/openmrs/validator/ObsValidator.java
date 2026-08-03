@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import org.hibernate.HibernateException;
 import org.openmrs.Concept;
 import org.openmrs.ConceptDatatype;
 import org.openmrs.ConceptNumeric;
@@ -23,6 +24,9 @@ import org.openmrs.ObsReferenceRange;
 import org.openmrs.annotation.Handler;
 import org.openmrs.api.APIException;
 import org.openmrs.api.context.Context;
+import org.openmrs.api.impl.ObsArchiveHelper;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.validation.Errors;
 import org.springframework.validation.Validator;
 
@@ -96,7 +100,8 @@ public class ObsValidator implements Validator {
 
 	/**
 	 * Checks whether obs has all required values, and also checks to make sure that no obs group
-	 * contains any of its ancestors
+	 * contains any of its ancestors. This includes checking if the obs has any archived children which
+	 * would classify it as an obs group.
 	 *
 	 * @param obs
 	 * @param errors
@@ -113,6 +118,17 @@ public class ObsValidator implements Validator {
 		}
 
 		boolean isObsGroup = obs.hasGroupMembers(true);
+		if (!isObsGroup && obs.getObsId() != null) {
+			try {
+				ObsArchiveHelper archiveHelper = Context.getRegisteredComponent("obsArchiveHelper", ObsArchiveHelper.class);
+				if (archiveHelper != null && archiveHelper.hasArchivedChildren(obs.getObsId())) {
+					isObsGroup = true;
+				}
+			} catch (APIException | HibernateException | DataAccessException e) {
+				LoggerFactory.getLogger(ObsValidator.class).warn("Failed to check for archived children for obs {}",
+				    obs.getObsId(), e);
+			}
+		}
 		// if this is an obs group (i.e., parent) make sure that it has no values (other than valueGroupId) set
 		if (isObsGroup) {
 			if (obs.getValueCoded() != null) {
